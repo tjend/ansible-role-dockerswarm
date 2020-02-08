@@ -1,0 +1,4 @@
+---
+
+# name of custom node label
+#dockerswarm_node_label: custom_node_label
