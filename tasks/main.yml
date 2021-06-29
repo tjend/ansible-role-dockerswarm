@@ -1,83 +1,42 @@
 ---
 
-# setup docker swarm on nodes
-# first node is the manager
-# all others are workers
-# ensure tcp port 2377 is open on management nodes(cluster management)
-# ensure tcp/udp port 7946 is open on all nodes(network discovery)
-# ensure udp port 4789 is open on all nodes(ingress networking)
-
 - name: install docker.io
   package:
     name:
       - docker.io
-      - python3-pip
+      - python3-docker
     state: present
-
-- name: configure docker
-  template:
-    src: daemon.json.j2
-    dest: /etc/docker/daemon.json
-  notify: restart docker
 
 - name: enable docker service
   service:
     name: docker
     enabled: yes
 
-- name: install python-docker from pip(need >=2.6.0)
-  pip:
-    name: docker==2.6.0
-
-- name: initialise docker swarm on manager(first host)
+- name: initialise docker swarm on first node(the first node is always a manager node)
   docker_swarm:
     state: present
-  register: swarm_manager_info
-  run_once: true
+  register: swarm_init_info
+  run_once: true # run only on first node and make registered variable avilable to all nodes
 
-# if there is an error, you have to manually cleanup - https://github.com/ansible/ansible/issues/57951
-# run 'docker swarm leave' on worker hosts
-- name: join worker nodes to swarm(all but first host)
+- name: join other manager nodes to the swarm(all but first manager node)
   docker_swarm:
     state: join
     advertise_addr: "{{ ansible_default_ipv4.address }}"
-    join_token: "{{ swarm_manager_info.swarm_facts.JoinTokens.Worker }}"
+    join_token: "{{ swarm_init_info.swarm_facts.JoinTokens.Manager }}"
     remote_addrs: "{{ hostvars[ansible_play_hosts[0]].ansible_facts.default_ipv4.address }}"
-  when: inventory_hostname != ansible_play_hosts_all[0]
+  when:
+    - dockerswarm_node_role == 'manager'
+    - inventory_hostname != ansible_play_hosts_all[0]
 
-- name: check if loki docker plugin is installed
-  command: docker plugin inspect loki
-  check_mode: no # run even in check mode
-  changed_when: docker_plugin_loki.rc != 0
-  failed_when: false # never fail
-  register: docker_plugin_loki
-
-- name: install loki docker plugin
-  command: docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
-  when: docker_plugin_loki.rc != 0
-
-- name: get all docker swarm nodes' names(first host)
-  command: "docker node ls --format '{% raw %}{{ .Hostname }}{% endraw %}'"
-  changed_when: false
-  check_mode: no # run even in check mode
-  register: docker_nodes
-  run_once: true
-  when: dockerswarm_node_label is defined
-
-- name: check label on docker swarm nodes(first host)
-  command: "docker node inspect --format '{% raw %}{{ .Spec.Labels.{% endraw %}{{ dockerswarm_node_label }} }}' {{ item }}"
-  with_items: "{{ docker_nodes.stdout_lines }}"
-  check_mode: no # run even in check mode
-  changed_when: docker_nodes_labels.stdout != 'yes'
-  register: docker_nodes_labels
-  run_once: true
-  when: dockerswarm_node_label is defined
-
-- name: label docker swarm nodes(first host)
-  command: "docker node update --label-add {{ dockerswarm_node_label }}=yes {{ item.item }}"
-  with_items: "{{ docker_nodes_labels.results }}"
-  run_once: true
-  when: dockerswarm_node_label is defined and item.changed
+- name: join worker nodes to the swarm
+  docker_swarm:
+    state: join
+    advertise_addr: "{{ ansible_default_ipv4.address }}"
+    join_token: "{{ swarm_init_info.swarm_facts.JoinTokens.Worker }}"
+    remote_addrs: "{{ hostvars[ansible_play_hosts[0]].ansible_facts.default_ipv4.address }}"
+  when:
+    - dockerswarm_node_role == 'worker'
+    - inventory_hostname != ansible_play_hosts_all[0]
 
 #- name: inspect docker swarm
 #  docker_swarm:

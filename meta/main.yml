@@ -1,10 +1,10 @@
 ---
 galaxy_info:
   author: tjend
-  description: Ansible role to create a single manager docker swarm
+  description: Ansible role to create a docker swarm
   company:
   license: MIT
-  min_ansible_version: 2.7.7
+  min_ansible_version: 3.7.3
   platforms:
     - name: Debian
       versions:
